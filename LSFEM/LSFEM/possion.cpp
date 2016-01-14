@@ -310,6 +310,10 @@ int main(int argc, char * argv[])
     // 	}
     // }    
 
+ 
+
+
+// 统计非零元个数
     for (the_element = fem_space0.beginElement(); 
     	 the_element != end_element; 
     	 ++the_element) 
@@ -335,18 +339,19 @@ int main(int argc, char * argv[])
 		int n_dof1 = ele_pattern[idx1].size();
 		int n_dof2 = ele_pattern[idx2[i]].size();
 		for (int j = 0; j < ele_pattern[idx1].size(); ++j)
-		    n_nz[ele_pattern[idx1][j]] += n_dof1 + n_dof2;
+		    n_nz[ele_pattern[idx1][j]] += n_dof2;
 	    }
     	}
 //	std::cout<<idx2[0]<<" , "<<idx2[1]<<" , "<<idx2[3]<<std::endl;
 //		std::cout<<idx1<<"; "<<std::endl;	
     }
 
+//非零元个数矫正
     for (int i = 0; i < n_element; ++i)
     {
 	if (n_nz[i] > n_element)
 	    n_nz[i]=n_element;
-	std::cout<<n_nz[i]<<std::endl;
+//	std::cout<<n_nz[i]<<std::endl;
     }
 
     SparsityPattern sp_mat(n_element, n_nz);
@@ -366,6 +371,7 @@ int main(int argc, char * argv[])
     // 	}
     // }
 
+    //确定非零元在矩阵的位置，
     for (the_element = fem_space0.beginElement(); 
     	 the_element != end_element; 
     	 ++the_element) 
@@ -402,7 +408,7 @@ int main(int argc, char * argv[])
     //右端项
     Vector<double> right_hand_side(n_element);
 
-    //juzhenpinzhuang
+    //矩阵第一部分（梯度内积）拼装/右端项拼装
     for (the_element = fem_space0.beginElement(); 
 	 the_element != end_element; ++the_element) 
     {
@@ -443,15 +449,52 @@ int main(int argc, char * argv[])
 	    }
 	}
 
-	std::cout<<stiff_matrix.diag_element(k)<<std::endl;
+//	std::cout<<stiff_matrix.diag_element(k)<<std::endl;
     }
 
-    
+
+    //矩阵第二部分（内部边界通量）拼装
+    for (the_element = fem_space0.beginElement(); 
+    	 the_element != end_element; 
+    	 ++the_element) 
+    {
+    	int idx1=the_element->index();
+    	GeometryBM &geo = the_element->geometry();
+    	unsigned int n_boundary = geo.n_boundary();
+	std::vector<int >idx2(n_boundary);
+    	for( unsigned int i = 0; i < n_boundary; ++i )
+	{
+    	    unsigned int dof_index = the_element->dof().at(0);
+    	    unsigned int boundary_index = geo.boundary( i );
+    	    DGElement<double, DIM> &dg_ele = fem_space0.dgElement( boundary_index );
+    	    Element<double, DIM> *p_neigh = dg_ele.p_neighbourElement( 0 );
+    	    if( p_neigh == &(*the_element) )
+    		p_neigh = dg_ele.p_neighbourElement(1);
+	    if( p_neigh != NULL )
+	    {
+                 /// 计算边长
+		double length = dg_ele.templateElement().volume();
+		const QuadratureInfo<1>& dg_quad_info = dg_ele.findQuadratureInfo( 0 );
+		std::vector<double> dg_jacobian = dg_ele.local_to_global_jacobian( dg_quad_info.quadraturePoint() );
+		length *= dg_jacobian[ 0 ];
+		/// 取外法向
+		std::vector<Point<DIM> > dg_ele_ip = dg_ele.local_to_global( dg_quad_info.quadraturePoint() );
+		std::vector<double> uno = unitOutNormal( dg_ele_ip[0], *the_element, dg_ele );
+		std::vector<std::vector<double> > basis_value = the_element->basis_function_value(dg_ele_ip );
+
+		//	std::cout<<basis_value[0][0]<<std::endl;
+		std::cout<<gsl_vector_get( lambda[0][12],1)<<std::endl;
+	    }
+	
+	}
+    }
+   
+ 
 
   
   
 
-
+    //shifang hanshu kongjian
     for(int i = 0; i < n_element; ++i)
 	for(int j = 0; j < ele_pattern[i].size(); ++j)
 	    gsl_vector_free(lambda[i][j]);
