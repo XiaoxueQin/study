@@ -35,6 +35,7 @@
 #define DIM 2
 double u(const double *);
 double f(const double *);
+//int side_ele_pat ( std::vector<int>  , std::vector<int> );
 
 int main(int argc, char * argv[])
 {
@@ -110,15 +111,13 @@ int main(int argc, char * argv[])
     }
 
     /// 单元模板.
-    std::vector<std::vector<double> > ele_pattern(n_element);
+    std::vector<std::vector<int> > ele_pattern(n_element);
     /// 构建单元模板.
     for (int i = 0; i < n_element; ++i)
     {
 
-	int n_ele = 0;
 	/// 通过一个双向链表, 动态以单元编号从小到大的次序插入.
 	std::list<int> tmp_ele_pattern;
-	int l = 0;
 	for (int j = 0; j < map_ele2vtx[i].size(); ++j)
 	{
 	    for (int k = 0; k < map_vtx2ele[map_ele2vtx[i][j]].size(); ++k)
@@ -291,62 +290,112 @@ int main(int argc, char * argv[])
     // 	    for (int k = 0; k < 6; ++k)
 		//	std::cout<<gsl_vector_get( lambda[i][j],k)<<std::endl;
 
-   /// 先统计每一行非零元个数.
-    std::vector<unsigned int> n_nz(n_element);
-    // for (the_element = fem_space0.beginElement(); 
-    // 	 the_element != end_element; 
-    // 	 ++the_element) 
-    // {
-    // 	int ele_idx = the_element->index();
-    // 	/// 每一单元的模版中任两个单元都会确定一个非零元.
-    // 	int n_dof_pat = ele_pattern[ele_idx].size();
-    // 	for (int i = 0; i < n_dof_pat; ++i)
-    // 	{
-    // 	    int row_id = ele_pattern[ele_idx][i]; 
-    // 	    n_nz[row_id] += n_dof_pat;
-    // 	    /// 防止小网格情形, 每行非零元个数超过行数.
-    // 	    if (n_nz[row_id] > n_element)
-    // 		n_nz[row_id] = n_element;
-    // 	}
-    // }    
-
- 
 
 
-// 统计非零元个数
+
+
+     // 构造内部边界 的模板（为在此边界处有定义的基函数指标）
+    std::vector<std::vector<int >> side_ele (n_side);	
     for (the_element = fem_space0.beginElement(); 
     	 the_element != end_element; 
     	 ++the_element) 
     {
     	int idx1=the_element->index();
+    	int n_ele_pat = ele_pattern[idx1].size();
     	GeometryBM &geo = the_element->geometry();
     	unsigned int n_boundary = geo.n_boundary();
-	std::vector<int >idx2(n_boundary);
-//	std::cout<<"OK:"<<n_boundary<<std::endl;
     	for( unsigned int i = 0; i < n_boundary; ++i )
     	{
-    	    unsigned int dof_index = the_element->dof().at(0);
     	    unsigned int boundary_index = geo.boundary( i );
     	    DGElement<double, DIM> &dg_ele = fem_space0.dgElement( boundary_index );
     	    Element<double, DIM> *p_neigh = dg_ele.p_neighbourElement( 0 );
     	    if( p_neigh == &(*the_element) )
     		p_neigh = dg_ele.p_neighbourElement(1);
-	    if( p_neigh == NULL )
-		break;
-	    else{
-		idx1 = the_element->index();
-		idx2[i] = p_neigh->index();
-		int n_dof1 = ele_pattern[idx1].size();
-		int n_dof2 = ele_pattern[idx2[i]].size();
-		for (int j = 0; j < ele_pattern[idx1].size(); ++j)
-		    n_nz[ele_pattern[idx1][j]] += n_dof2;
+    	    if( p_neigh != NULL )
+    	    {
+
+    		std::list<int > tmp_A;
+    		std::list<int>::iterator pattern_iterator = tmp_A.begin();
+    		std::list<int>::iterator pattern_end = tmp_A.end();
+	
+    		for (int i = 0; i < ele_pattern[idx1].size(); ++i)
+		    tmp_A.push_back(ele_pattern[idx1][i]);	
+
+    		for (int j = 0; j < ele_pattern[p_neigh->index() ].size(); ++j)
+    		{
+	   
+    		    int ele_idx2add = ele_pattern[p_neigh->index()][j];
+    		    /// 判定是否有插入完成.
+    		    bool isinserted = false;
+    		    for (pattern_iterator = tmp_A.begin(); pattern_iterator != pattern_end; ++pattern_iterator)
+    			/// 若该单元已存在, 跳过.
+    			if (*pattern_iterator == ele_idx2add)
+    			{
+    			    isinserted = true;
+    			    break;
+    			} /// 若当前单元编号大于等待插入单元编号, 则插入前一个位置.
+    			else if (*pattern_iterator > ele_idx2add)
+    			{
+    			    isinserted = true;
+    			    tmp_A.insert(pattern_iterator, ele_idx2add);
+    			    break;
+    			}
+    			/// 之前未插入, 则插在最后.
+		    if (isinserted == false)
+		    {
+			tmp_A.push_back(ele_idx2add);
+		    }
+		    /// 将链表复制到数组索引.
+		    side_ele[boundary_index].resize(tmp_A.size());
+		    std::list<int>::iterator pattern_iterator = tmp_A.begin();
+		    std::list<int>::iterator pattern_end = tmp_A.end();
+		    for (int j = 0; pattern_iterator != pattern_end; ++pattern_iterator, ++j)
+		    	side_ele[boundary_index][j] = *pattern_iterator;    		        
+	
+		}
 	    }
-    	}
-//	std::cout<<idx2[0]<<" , "<<idx2[1]<<" , "<<idx2[3]<<std::endl;
-//		std::cout<<idx1<<"; "<<std::endl;	
+	}
     }
 
-//非零元个数矫正
+
+    /// 先统计每一行非零元个数.
+     std::vector<unsigned int> n_nz(n_element);
+     for (int i = 0 ; i < n_side; ++i)
+     {
+     	 for (int j = 0; j < side_ele[i].size(); ++j)
+     	     n_nz[side_ele[i][j]] += side_ele[i].size();
+     } 
+   
+     // for (the_element = fem_space0.beginElement(); 
+    // 	 the_element != end_element; 
+    // 	 ++the_element) 
+    // {
+    // 	int idx1=the_element->index();
+    // 	GeometryBM &geo = the_element->geometry();
+    // 	unsigned int n_boundary = geo.n_boundary();
+    // 	std::vector<int >idx2(n_boundary);
+    // 	for( unsigned int i = 0; i < n_boundary; ++i )
+    // 	{
+    // 	    unsigned int dof_index = the_element->dof().at(0);
+    // 	    unsigned int boundary_index = geo.boundary( i );
+    // 	    DGElement<double, DIM> &dg_ele = fem_space0.dgElement( boundary_index );
+    // 	    Element<double, DIM> *p_neigh = dg_ele.p_neighbourElement( 0 );
+    // 	    if( p_neigh == &(*the_element) )
+    // 		p_neigh = dg_ele.p_neighbourElement(1);
+    // 	    if( p_neigh == NULL )
+    // 		break;
+    // 	    else{
+    // 		idx1 = the_element->index();
+    // 		idx2[i] = p_neigh->index();
+    // 		int n_dof1 = ele_pattern[idx1].size();
+    // 		int n_dof2 = ele_pattern[idx2[i]].size();
+    // 		for (int j = 0; j < ele_pattern[idx1].size(); ++j)
+    // 		    n_nz[ele_pattern[idx1][j]] += n_dof2;
+    // 	    }
+    // 	}
+    // }
+
+    //非零元个数矫正
     for (int i = 0; i < n_element; ++i)
     {
 	if (n_nz[i] > n_element)
@@ -356,49 +405,39 @@ int main(int argc, char * argv[])
 
     SparsityPattern sp_mat(n_element, n_nz);
 
+    for(int i = 0; i < n_side; ++i)
+	for(int j = 0; j < side_ele[i].size(); ++j)
+	    for(int k = 0; k < side_ele[i].size(); ++k)
+		sp_mat.add(side_ele[i][j],side_ele[i][k]);
+
+    //确定非零元在矩阵的位置，
     // for (the_element = fem_space0.beginElement(); 
     // 	 the_element != end_element; 
     // 	 ++the_element) 
     // {
-    // 	int ele_idx = the_element->index();
-    // 	/// 每一单元的模版中任两个单元都会确定一个非零元.
-    // 	int n_dof_pat = ele_pattern[ele_idx].size();
-    // 	for (int i = 0; i < n_dof_pat; ++i)
+    // 	int idx1=the_element->index();
+    // 	GeometryBM &geo = the_element->geometry();
+    // 	unsigned int n_boundary = geo.n_boundary();
+    // 	std::vector<int >idx2(n_boundary);
+    // 	for( unsigned int i = 0; i < n_boundary; ++i )
     // 	{
-    // 	    int row_id = ele_pattern[ele_idx][i];
-    // 	    for (int j = 0; j < n_dof_pat; ++j)
-    // 		sp_mat.add(row_id, ele_pattern[ele_idx][j]);
+    // 	    unsigned int dof_index = the_element->dof().at(0);
+    // 	    unsigned int boundary_index = geo.boundary( i );
+    // 	    DGElement<double, DIM> &dg_ele = fem_space0.dgElement( boundary_index );
+    // 	    Element<double, DIM> *p_neigh = dg_ele.p_neighbourElement( 0 );
+    // 	    if( p_neigh == &(*the_element) )
+    // 		p_neigh = dg_ele.p_neighbourElement(1);
+    // 	    if( p_neigh == NULL )
+    // 		break;
+    // 	    else{
+    // 		idx1 = the_element->index();
+    // 		idx2[i] = p_neigh->index();
+    // 		for(int ii = 0; ii < ele_pattern[idx1].size(); ++ii)
+    // 		    for (int jj = 0; jj < ele_pattern[idx2[i]].size(); ++jj)
+    // 			sp_mat.add(ele_pattern[idx1][ii],ele_pattern[idx2[i]][jj]);
+    // 	    }
     // 	}
     // }
-
-    //确定非零元在矩阵的位置，
-    for (the_element = fem_space0.beginElement(); 
-    	 the_element != end_element; 
-    	 ++the_element) 
-    {
-    	int idx1=the_element->index();
-    	GeometryBM &geo = the_element->geometry();
-    	unsigned int n_boundary = geo.n_boundary();
-	std::vector<int >idx2(n_boundary);
-    	for( unsigned int i = 0; i < n_boundary; ++i )
-    	{
-    	    unsigned int dof_index = the_element->dof().at(0);
-    	    unsigned int boundary_index = geo.boundary( i );
-    	    DGElement<double, DIM> &dg_ele = fem_space0.dgElement( boundary_index );
-    	    Element<double, DIM> *p_neigh = dg_ele.p_neighbourElement( 0 );
-    	    if( p_neigh == &(*the_element) )
-    		p_neigh = dg_ele.p_neighbourElement(1);
-	    if( p_neigh == NULL )
-		break;
-	    else{
-		idx1 = the_element->index();
-		idx2[i] = p_neigh->index();
-		for(int ii = 0; ii < ele_pattern[idx1].size(); ++ii)
-		    for (int jj = 0; jj < ele_pattern[idx2[i]].size(); ++jj)
-			sp_mat.add(ele_pattern[idx1][ii],ele_pattern[idx2[i]][jj]);
-	    }
-    	}
-    }
 
     sp_mat.compress();
 
@@ -451,14 +490,21 @@ int main(int argc, char * argv[])
 
 //	std::cout<<stiff_matrix.diag_element(k)<<std::endl;
     }
+    
 
-
+    std::vector<std::vector<std::vector<double> > >  mean(n_side);
+    std::vector<std::vector<std::vector<double> > >  jump(n_side);
+    
     //矩阵第二部分（内部边界通量）拼装
     for (the_element = fem_space0.beginElement(); 
     	 the_element != end_element; 
     	 ++the_element) 
     {
     	int idx1=the_element->index();
+	int n_ele_pat = ele_pattern[idx1].size();
+	
+
+	int n_element_dof = the_element->n_dof();
     	GeometryBM &geo = the_element->geometry();
     	unsigned int n_boundary = geo.n_boundary();
 	std::vector<int >idx2(n_boundary);
@@ -474,25 +520,32 @@ int main(int argc, char * argv[])
 	    {
                  /// 计算边长
 		double length = dg_ele.templateElement().volume();
-		const QuadratureInfo<1>& dg_quad_info = dg_ele.findQuadratureInfo( 0 );
+		const QuadratureInfo<1>& dg_quad_info = dg_ele.findQuadratureInfo( 2 );
+		int n_quadrature_point = dg_quad_info.n_quadraturePoint();
 		std::vector<double> dg_jacobian = dg_ele.local_to_global_jacobian( dg_quad_info.quadraturePoint() );
-		length *= dg_jacobian[ 0 ];
+                //length *= dg_jacobian[ 0 ];
 		/// 取外法向
+   
 		std::vector<Point<DIM> > dg_ele_ip = dg_ele.local_to_global( dg_quad_info.quadraturePoint() );
 		std::vector<double> uno = unitOutNormal( dg_ele_ip[0], *the_element, dg_ele );
+		std::vector<std::vector<std::vector<double> > > basis_gradient = the_element->basis_function_gradient(dg_ele_ip);
 		std::vector<std::vector<double> > basis_value = the_element->basis_function_value(dg_ele_ip );
 
-		//	std::cout<<basis_value[0][0]<<std::endl;
-		std::cout<<gsl_vector_get( lambda[0][12],1)<<std::endl;
-	    }
+		double cont;
+		for (int l = 0; l < n_quadrature_point; ++l)
+		{ 
+		    double Jxw = dg_quad_info.weight(l) * dg_jacobian[l] * length;
+		    for (int j = 0; j < n_element_dof; ++j)
+			for (int jj = 0 ; jj < n_ele_pat; ++jj)
+			    cont += Jxw * innerProduct( basis_gradient[j][l], uno )* gsl_vector_get(lambda[idx1][jj],j) * gsl_vector_get(lambda[idx1][jj],j) * basis_value[j][l] * 0.5;
+		}
+		std::cout<<cont<<std::endl;
 	
+	    }
+	std::cout<<std::endl;
 	}
-    }
-   
- 
 
-  
-  
+    }
 
     //shifang hanshu kongjian
     for(int i = 0; i < n_element; ++i)
