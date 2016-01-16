@@ -462,7 +462,7 @@ int main(int argc, char * argv[])
 	std::vector<std::vector<double> > basis_value = the_element->basis_function_value(q_point);
 	const std::vector<int>& element_dof = the_element->dof();
 	int n_element_dof = the_element->n_dof();
-	int row,col; 
+	int row,col;
 	double cont;
 	for (int l = 0; l < n_quadrature_point; ++l)
 	{
@@ -471,7 +471,7 @@ int main(int argc, char * argv[])
 	    for (int i = 0; i < n_element_dof; ++i)
 	    {
 		for (int ii = 0; ii < n_ele_pat; ++ii)
-		{
+		{  
 		    for (int j = 0; j < n_element_dof; ++j)
 		    {
 			for (int jj = 0 ; jj < n_ele_pat; ++jj)
@@ -484,6 +484,7 @@ int main(int argc, char * argv[])
 			}
 		    }
 		    right_hand_side(row) += Jxw * basis_value[i][l] * f(q_point[l]) * gsl_vector_get(lambda[k][ii], i);  
+		    //  std::cout<<right_hand_side(row)<<std::endl;
 		}
 	    }
 	}
@@ -492,9 +493,97 @@ int main(int argc, char * argv[])
     }
     
 
-    std::vector<std::vector<std::vector<double> > >  mean(n_side);
-    std::vector<std::vector<std::vector<double> > >  jump(n_side);
+    //边界积分的中间量，跃度和均值。。第一维：边界编号，第二维：lambda 在side_ele中的指标，第三维：高斯积分点，
+    int n_side_qua = 2;
+    std::vector<std::vector<std::vector<std::vector<double> > > > mean(n_side);
+    std::vector<std::vector<std::vector<std::vector<double> > > > jump(n_side);
+    for (int i = 0; i < n_side; ++i)
+    {
+	jump[i].resize(side_ele[i].size());
+	mean[i].resize(side_ele[i].size());
+	for (int j = 0; j < side_ele[i].size(); ++j)
+	{
+	    jump[i][j].resize(n_side_qua);
+	    mean[i][j].resize(n_side_qua);
+	    for (int k =0; k < n_side_qua; ++k)
+	    { 
+		jump[i][j][k].resize(2);
+		mean[i][j][k].resize(2);
+	    }
+	}
+    }
     
+
+    //遍历，赋值跃度与均值
+    for (the_element = fem_space0.beginElement(); 
+    	 the_element != end_element; 
+    	 ++the_element) 
+    {
+    	int idx1=the_element->index();
+	int n_ele_pat = ele_pattern[idx1].size();
+	int n_element_dof = the_element->n_dof();
+    	GeometryBM &geo = the_element->geometry();
+    	unsigned int n_boundary = geo.n_boundary();
+    	for( unsigned int i = 0; i < n_boundary; ++i )
+	{
+    	    unsigned int boundary_index = geo.boundary( i );
+    	    DGElement<double, DIM> &dg_ele = fem_space0.dgElement( boundary_index );
+    	    Element<double, DIM> *p_neigh = dg_ele.p_neighbourElement( 0 );
+    	    if( p_neigh == &(*the_element) )
+    		p_neigh = dg_ele.p_neighbourElement(1);
+	    if( p_neigh != NULL )
+	    {
+		const QuadratureInfo<1>& dg_quad_info = dg_ele.findQuadratureInfo( n_side_qua);
+		int n_quadrature_point = dg_quad_info.n_quadraturePoint();
+		/// 取外法向 
+		std::vector<Point<DIM> > dg_ele_ip = dg_ele.local_to_global( dg_quad_info.quadraturePoint() );
+		std::vector<double> uno = unitOutNormal( dg_ele_ip[0], *the_element, dg_ele );
+		std::vector<std::vector<std::vector<double> > > basis_gradient = the_element->basis_function_gradient(dg_ele_ip);
+		std::vector<std::vector<double> > basis_value = the_element->basis_function_value(dg_ele_ip );		
+		std::vector<double> cont(2);
+                //边模板与单元模板中基函数的指标对应; 以及判断该单元中是否有此基函数
+		bool lam_check;
+		lam_check = true;
+		for (int l = 0; l < n_quadrature_point; ++l)
+		{ 
+		    for (int j = 0; j < side_ele[boundary_index].size() ; ++j)
+		    {
+			int jj;
+			for(int k = 0; k < n_ele_pat + 1; ++k)
+			    if( k == n_ele_pat)
+			    {
+				lam_check = false;
+				break;
+			    }
+			    else if (ele_pattern[idx1][k] == side_ele[boundary_index][j] )
+			    {	
+				jj = k;
+				break;		
+			    }
+			    else
+				continue; 
+			if(lam_check == true )
+			{
+			    for (int k = 0; k < n_element_dof; ++k)
+			    {
+				cont[0] =  gsl_vector_get(lambda[idx1][0],k) * basis_value[k][l] *uno[0];
+				cont[1] =  gsl_vector_get(lambda[idx1][0],k) * basis_value[k][l] *uno[1];
+				jump[boundary_index][j][l][0] += cont[0];
+				jump[boundary_index][j][l][1] += cont[1];
+				mean[boundary_index][j][l][0] += gsl_vector_get(lambda[idx1][0],k) * basis_gradient[k][l][0];
+				mean[boundary_index][j][l][1] += gsl_vector_get(lambda[idx1][0],k) * basis_gradient[k][l][1] * 0.5;
+			    }
+			}		
+		    }
+		}   
+	    }
+	}
+    }
+
+
+
+
+
     //矩阵第二部分（内部边界通量）拼装
     for (the_element = fem_space0.beginElement(); 
     	 the_element != end_element; 
@@ -502,15 +591,12 @@ int main(int argc, char * argv[])
     {
     	int idx1=the_element->index();
 	int n_ele_pat = ele_pattern[idx1].size();
-	
-
 	int n_element_dof = the_element->n_dof();
     	GeometryBM &geo = the_element->geometry();
     	unsigned int n_boundary = geo.n_boundary();
 	std::vector<int >idx2(n_boundary);
     	for( unsigned int i = 0; i < n_boundary; ++i )
 	{
-    	    unsigned int dof_index = the_element->dof().at(0);
     	    unsigned int boundary_index = geo.boundary( i );
     	    DGElement<double, DIM> &dg_ele = fem_space0.dgElement( boundary_index );
     	    Element<double, DIM> *p_neigh = dg_ele.p_neighbourElement( 0 );
@@ -523,31 +609,34 @@ int main(int argc, char * argv[])
 		const QuadratureInfo<1>& dg_quad_info = dg_ele.findQuadratureInfo( 2 );
 		int n_quadrature_point = dg_quad_info.n_quadraturePoint();
 		std::vector<double> dg_jacobian = dg_ele.local_to_global_jacobian( dg_quad_info.quadraturePoint() );
-                //length *= dg_jacobian[ 0 ];
-		/// 取外法向
-   
-		std::vector<Point<DIM> > dg_ele_ip = dg_ele.local_to_global( dg_quad_info.quadraturePoint() );
-		std::vector<double> uno = unitOutNormal( dg_ele_ip[0], *the_element, dg_ele );
-		std::vector<std::vector<std::vector<double> > > basis_gradient = the_element->basis_function_gradient(dg_ele_ip);
-		std::vector<std::vector<double> > basis_value = the_element->basis_function_value(dg_ele_ip );
-
-		double cont;
+                double cont;
 		for (int l = 0; l < n_quadrature_point; ++l)
 		{ 
 		    double Jxw = dg_quad_info.weight(l) * dg_jacobian[l] * length;
-		    for (int j = 0; j < n_element_dof; ++j)
-			for (int jj = 0 ; jj < n_ele_pat; ++jj)
-			    cont += Jxw * innerProduct( basis_gradient[j][l], uno )* gsl_vector_get(lambda[idx1][jj],j) * gsl_vector_get(lambda[idx1][jj],j) * basis_value[j][l] * 0.5;
+		    for (int i = 0; i < side_ele[boundary_index].size(); ++i)
+			for (int j = 0 ; j < side_ele[boundary_index].size(); ++j)
+			{
+			    cont -= Jxw * ( innerProduct(jump[boundary_index][i][l],mean[boundary_index][j][l])+  innerProduct(mean[boundary_index][i][l],jump[boundary_index][j][l])+ innerProduct(jump[boundary_index][i][l],jump[boundary_index][j][l]));
+			    stiff_matrix.add(side_ele[boundary_index][i],side_ele[boundary_index][j],cont);
+			}
 		}
-		std::cout<<cont<<std::endl;
-	
 	    }
-	std::cout<<std::endl;
 	}
-
     }
 
-    //shifang hanshu kongjian
+    
+    ///不会用
+    FEMFunction<double, DIM> solution(fem_space0);
+    FEMFunction<double, DIM> solutionAMG(solution);
+    AMGSolver solver(stiff_matrix);
+    solver.solve(solutionAMG, right_hand_side, 1.0e-12, 1000);	
+    solutionAMG.writeOpenDXData("uAMG.dx");
+
+
+
+
+
+    //释放基函数空间
     for(int i = 0; i < n_element; ++i)
 	for(int j = 0; j < ele_pattern[i].size(); ++j)
 	    gsl_vector_free(lambda[i][j]);
