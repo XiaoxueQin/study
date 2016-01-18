@@ -1,0 +1,36 @@
+object 1 class array type float rank 1 shape 2 item 12 data follows
+3.00000000e-01	3.00000000e-01	
+0.00000000e+00	0.00000000e+00	
+5.00000000e-01	0.00000000e+00	
+0.00000000e+00	5.00000000e-01	
+6.42857145e-01	3.57142855e-01	
+3.57142855e-01	6.42857145e-01	
+1.00000000e+00	0.00000000e+00	
+0.00000000e+00	1.00000000e+00	
+7.00000000e-01	7.00000000e-01	
+1.00000000e+00	5.00000000e-01	
+5.00000000e-01	1.00000000e+00	
+1.00000000e+00	1.00000000e+00	
+
+object 2 class array type int rank 1 shape 3 item 14 data follows
+0	1	2	
+0	3	1	
+0	2	4	
+5	3	0	
+5	0	4	
+4	2	6	
+5	7	3	
+5	4	8	
+4	6	9	
+4	9	8	
+5	10	7	
+8	10	5	
+8	9	11	
+8	11	10	
+attribute "element type" string "triangles"
+attribute "ref" string "positions"
+
+object "FEMFunction-2d" class field
+component "positions" value 1
+component "connections" value 2
+end
